@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>伺服器活動表</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; padding: 20px; }
+    h1 { margin-bottom: 0; }
+    #taiwanTime { font-weight: bold; color: darkblue; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <h1>伺服器活動查詢</h1>
+  <p>系統偵測到的台灣時間：<span id="taiwanTime"></span></p>
+
+  <label for="serverSelect">選擇伺服器：</label>
+  <select id="serverSelect">
+    <option value="37">37服</option>
+    <option value="41">41服</option>
+  </select>
+  <button onclick="loadExcel()">載入資料</button>
+
+  <div id="result" style="margin-top: 20px;"></div>
+
+  <script>
+    function updateTaiwanTime() {
+      const now = new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
+      document.getElementById("taiwanTime").textContent = now;
+    }
+
+    updateTaiwanTime();
+    setInterval(updateTaiwanTime, 1000);
+
+    function parseDate(str, year) {
+      if (str instanceof Date) {
+        return new Date(str);
+      }
+      str = String(str);
+      const parts = str.split("/");
+      if (parts.length !== 2) {
+        console.warn("無法解析日期格式：", str);
+        return new Date("Invalid Date");
+      }
+      const [m, d] = parts.map(Number);
+      return new Date(year, m - 1, d);
+    }
+
+    async function loadExcel() {
+      const resultDiv = document.getElementById("result");
+      resultDiv.innerHTML = "<p>載入中...</p>";
+
+      try {
+        const response = await fetch("data/schedule.xlsx");
+        if (!response.ok) throw new Error("無法讀取 Excel 檔案，HTTP 錯誤碼：" + response.status);
+        const arrayBuffer = await response.arrayBuffer();
+
+        const workbook = XLSX.read(arrayBuffer, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        const server = document.getElementById("serverSelect").value;
+
+        const now = new Date().toLocaleString("en-US", { timeZone: "Asia/Taipei" });
+        const currentDate = new Date(now);
+        const checkDate = new Date(currentDate);
+        checkDate.setDate(currentDate.getDate() - 7); // 🔄 減去七天
+        const currentYear = currentDate.getFullYear();
+
+        const filtered = rows.filter(row => {
+          if (row.length < 3) return false;
+          const dateStr = server === "37" ? row[0] : row[1];
+          if (!dateStr) return false;
+          const rowDate = parseDate(dateStr, currentYear);
+          if (isNaN(rowDate)) return false;
+          return rowDate >= checkDate;
+        });
+
+        filtered.sort((a, b) => {
+          const dateA = parseDate(server === "37" ? a[0] : a[1], currentYear);
+          const dateB = parseDate(server === "37" ? b[0] : b[1], currentYear);
+          return dateA - dateB;
+        });
+
+        if (filtered.length === 0) {
+          resultDiv.innerHTML = "<p>沒有符合條件的資料。</p>";
+        } else {
+          resultDiv.innerHTML = "<h2>活動清單（起始日期 -7天內）：</h2><ul>" +
+            filtered.map(row => `<li>${server === "37" ? row[0] : row[1]} - ${row[2]}</li>`).join("") +
+            "</ul>";
+        }
+      } catch (err) {
+        console.error("讀取失敗：", err);
+        resultDiv.innerHTML = "<p style='color: red;'>讀取失敗：" + err.message + "</p>";
+      }
+    }
+  </script>
+</body>
+</html>
